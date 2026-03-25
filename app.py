@@ -16,6 +16,7 @@ from lark_oapi.api.im.v1 import *
 
 import re
 from memory import MemoryLayer
+from scheduler import Scheduler
 
 # ============ 配置 ============
 APP_ID = os.environ.get("FEISHU_APP_ID", "")
@@ -42,6 +43,25 @@ client = lark.Client.builder() \
 
 
 # ============ 飞书消息发送 ============
+def send_message(user_id: str, text: str):
+    """主动给用户发消息（用于定时任务）"""
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n... (内容过长已截断)"
+    req = CreateMessageRequest.builder() \
+        .receive_id_type("open_id") \
+        .request_body(CreateMessageRequestBody.builder()
+                      .receive_id(user_id)
+                      .msg_type("text")
+                      .content(json.dumps({"text": text}))
+                      .build()) \
+        .build()
+    resp = client.im.v1.message.create(req)
+    if not resp.success():
+        log.error(f"主动发送失败: {resp.code} {resp.msg}")
+    else:
+        log.info(f"已主动发送消息给 {user_id}")
+
+
 def reply_message(message_id: str, text: str):
     if len(text) > 4000:
         text = text[:3950] + "\n\n... (内容过长已截断)"
@@ -109,8 +129,19 @@ def call_kiro(prompt: str) -> str:
         return f"❌ Kiro 调用失败: {e}"
 
 
+# ============ 定时任务调度器 ============
+task_scheduler = Scheduler(send_fn=send_message, kiro_fn=call_kiro)
+
+
 # ============ 异步处理 ============
 def handle_user_message(message_id: str, user_id: str, user_text: str):
+    # 处理 /schedule 命令
+    if user_text.startswith("/schedule"):
+        args = user_text[len("/schedule"):].strip()
+        result = task_scheduler.handle_command(user_id, args or "help")
+        reply_message(message_id, result)
+        return
+
     reply_message(message_id, "🤖 正在处理，请稍候...")
 
     # 立即存储用户原文（确保下次对话可用）
