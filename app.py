@@ -15,6 +15,7 @@ from lark_oapi.adapter.flask import *
 from lark_oapi.api.im.v1 import *
 
 import re
+from memory import MemoryLayer
 
 # ============ 配置 ============
 APP_ID = os.environ.get("FEISHU_APP_ID", "")
@@ -28,6 +29,9 @@ log = logging.getLogger("feishu-kiro")
 # 去重
 _processed = set()
 _processed_lock = threading.Lock()
+
+# ============ 记忆层 ============
+memory = MemoryLayer()
 
 # ============ 飞书客户端 ============
 client = lark.Client.builder() \
@@ -106,10 +110,24 @@ def call_kiro(prompt: str) -> str:
 
 
 # ============ 异步处理 ============
-def handle_user_message(message_id: str, user_text: str):
+def handle_user_message(message_id: str, user_id: str, user_text: str):
     reply_message(message_id, "🤖 正在处理，请稍候...")
-    kiro_response = call_kiro(user_text)
+
+    # 检索相关记忆
+    memories = memory.search(user_id, user_text)
+    if memories:
+        mem_text = "\n".join(f"- {m}" for m in memories)
+        prompt = f"关于这个用户的已知信息：\n{mem_text}\n\n用户消息：{user_text}"
+        log.info(f"命中 {len(memories)} 条记忆")
+    else:
+        prompt = user_text
+
+    kiro_response = call_kiro(prompt)
     reply_message(message_id, kiro_response)
+
+    # 异步提取记忆
+    conversation = f"用户：{user_text}\n助手：{kiro_response}"
+    threading.Thread(target=memory.extract_and_store, args=(user_id, conversation), daemon=True).start()
 
 
 # ============ 事件处理 ============
@@ -152,7 +170,8 @@ def on_message_receive(data: P2ImMessageReceiveV1) -> None:
         return
 
     log.info(f"用户消息: {user_text}")
-    t = threading.Thread(target=handle_user_message, args=(message_id, user_text))
+    user_id = data.event.sender.sender_id.open_id or "unknown"
+    t = threading.Thread(target=handle_user_message, args=(message_id, user_id, user_text))
     t.daemon = True
     t.start()
 

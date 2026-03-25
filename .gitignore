@@ -1,3 +1,5 @@
 .env
 __pycache__/
 *.pyc
+memory_db/
+test_memory_db/

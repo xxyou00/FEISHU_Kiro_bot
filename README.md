@@ -73,7 +73,22 @@ sudo systemctl start feishu-kiro-bot
 ## 依赖
 
 ```bash
-pip3 install lark-oapi
+pip3 install lark-oapi chromadb sentence-transformers
+```
+
+## 记忆功能
+
+Bot 集成了基于 ChromaDB 的向量记忆层，使用 `paraphrase-multilingual-MiniLM-L12-v2` 多语言 Embedding 模型：
+
+- 自动从对话中提取关键信息（用户偏好、事实、决策等）
+- 下次对话时检索相关记忆，提供上下文感知的回复
+- 按用户隔离，支持语义搜索（中英文）
+
+模型路径可通过环境变量 `EMBEDDING_MODEL` 配置，默认 `/home/ubuntu/modelscope/paraphrase-multilingual-MiniLM-L12-v2`。
+
+```bash
+# 运行记忆层测试
+python3 test_memory.py
 ```
 
 ## 查看日志
