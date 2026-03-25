@@ -113,6 +113,10 @@ def call_kiro(prompt: str) -> str:
 def handle_user_message(message_id: str, user_id: str, user_text: str):
     reply_message(message_id, "🤖 正在处理，请稍候...")
 
+    # 立即存储用户原文（确保下次对话可用）
+    memory.add(user_id, f"用户说：{user_text}")
+    log.info(f"已存储用户消息到记忆")
+
     # 检索相关记忆
     memories = memory.search(user_id, user_text)
     if memories:
@@ -125,7 +129,7 @@ def handle_user_message(message_id: str, user_id: str, user_text: str):
     kiro_response = call_kiro(prompt)
     reply_message(message_id, kiro_response)
 
-    # 异步提取记忆
+    # 异步提取结构化记忆（补充）
     conversation = f"用户：{user_text}\n助手：{kiro_response}"
     threading.Thread(target=memory.extract_and_store, args=(user_id, conversation), daemon=True).start()
 
