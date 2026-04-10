@@ -86,6 +86,20 @@ Bot 集成了基于 ChromaDB 的向量记忆层，使用 `paraphrase-multilingua
 
 模型路径可通过环境变量 `EMBEDDING_MODEL` 配置，默认 `/home/ubuntu/modelscope/paraphrase-multilingual-MiniLM-L12-v2`。
 
+### 记忆管理命令
+
+在飞书中发送以下命令管理记忆功能（按用户隔离，互不影响）：
+
+| 命令 | 功能 |
+|------|------|
+| `/memory status` | 查看记忆开关状态和已存储的记忆条数 |
+| `/memory on` | 开启记忆（默认状态） |
+| `/memory off` | 关闭记忆 — 不再存储、检索、提取记忆，prompt 原文直传 Kiro |
+| `/memory clear` | 清除所有历史记忆数据 |
+| `/memory` | 显示帮助信息 |
+
+> **提示**：当记忆内容干扰 Kiro skill 触发时（如 RDS 事件检查等），可先 `/memory off` 关闭记忆再发送指令。
+
 ```bash
 # 运行记忆层测试
 python3 test_memory.py
