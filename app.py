@@ -117,6 +117,7 @@ def call_kiro(prompt: str) -> str:
         result = subprocess.run(
             ["kiro-cli", "chat", "--no-interactive", "-a", "--agent", "my-dev-bot", "--wrap", "never", prompt],
             capture_output=True, text=True, timeout=KIRO_TIMEOUT,
+            cwd=os.path.expanduser("~"),
             env={**os.environ, "NO_COLOR": "1"},
         )
         output = result.stdout.strip()
