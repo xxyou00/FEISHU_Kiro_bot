@@ -17,6 +17,8 @@ from lark_oapi.api.im.v1 import *
 
 import re
 from scheduler import Scheduler
+from session_router import SessionRouter
+from kiro_executor import KiroExecutor, has_decision_signal
 
 ENABLE_MEMORY = os.environ.get("ENABLE_MEMORY", "false").lower() in ("true", "1", "yes")
 if ENABLE_MEMORY:
@@ -210,93 +212,147 @@ def strip_ansi(text: str) -> str:
 # ============ Kiro CLI 调用 ============
 kiro_bin = shutil.which("kiro-cli") or "/home/ubuntu/.local/bin/kiro-cli"
 
-def call_kiro(prompt: str) -> str:
-    log.info(f"调用 kiro-cli: {prompt[:80]}...")
+def call_kiro_simple(prompt: str) -> str:
+    """简单调用（供定时任务使用，无 session 管理）"""
+    log.info(f"调用 kiro-cli (simple): {prompt[:80]}...")
     try:
         cmd = [kiro_bin, "chat", "--no-interactive", "-a", "--wrap", "never"]
         if KIRO_AGENT:
             cmd += ["--agent", KIRO_AGENT]
         cmd.append(prompt)
         result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=KIRO_TIMEOUT,
-            cwd=os.path.expanduser("~"),
-            env={**os.environ, "NO_COLOR": "1"},
+            cmd, capture_output=True, text=True, timeout=KIRO_TIMEOUT,
+            cwd=os.path.expanduser("~"), env={**os.environ, "NO_COLOR": "1"},
         )
-        output = result.stdout.strip()
-        if not output:
-            output = result.stderr.strip() or "Kiro 未返回结果"
+        output = result.stdout.strip() or result.stderr.strip() or "Kiro 未返回结果"
         return strip_ansi(output)
     except subprocess.TimeoutExpired:
-        return f"⏰ Kiro 处理超时（{KIRO_TIMEOUT}s），请简化问题后重试"
+        return f"⏰ Kiro 处理超时（{KIRO_TIMEOUT}s）"
     except Exception as e:
         return f"❌ Kiro 调用失败: {e}"
 
 
 # ============ 定时任务调度器 ============
-task_scheduler = Scheduler(send_fn=send_message, kiro_fn=call_kiro)
+task_scheduler = Scheduler(send_fn=send_message, kiro_fn=call_kiro_simple)
+
+# ============ 会话路由 & 执行引擎 ============
+session_router = SessionRouter(kiro_bin=kiro_bin, kiro_agent=KIRO_AGENT)
+kiro_executor = KiroExecutor(agent=KIRO_AGENT)
 
 
 # ============ 异步处理 ============
 def handle_user_message(message_id: str, user_id: str, user_text: str):
-    # 处理 /schedule 命令
+    # ---- 已有命令 ----
     if user_text.startswith("/schedule"):
         args = user_text[len("/schedule"):].strip()
-        result = task_scheduler.handle_command(user_id, args or "help")
-        reply_message(message_id, result)
+        reply_message(message_id, task_scheduler.handle_command(user_id, args or "help"))
         return
-
-    # 处理 /memory 命令
     if user_text.startswith("/memory"):
         if not ENABLE_MEMORY:
-            reply_message(message_id, "🧠 记忆功能未启用。请在 .env 中设置 ENABLE_MEMORY=true 并安装依赖后重启。")
+            reply_message(message_id, "🧠 记忆功能未启用。")
             return
         args = user_text[len("/memory"):].strip().lower()
-        result = handle_memory_command(user_id, args)
-        reply_message(message_id, result)
+        reply_message(message_id, handle_memory_command(user_id, args))
+        return
+
+    # ---- 新增命令 ----
+    if user_text.strip() == "/new":
+        session_router.clear_active(user_id)
+        reply_message(message_id, "🆕 已切换到新会话模式，下条消息将开启新对话。")
+        return
+    if user_text.strip().startswith("/resume"):
+        parts = user_text.strip().split()
+        if len(parts) < 2:
+            reply_message(message_id, "用法：/resume <编号>\n发送 /sessions 查看可用会话。")
+            return
+        try:
+            short_id = int(parts[1].lstrip("#"))
+        except ValueError:
+            reply_message(message_id, "❌ 请输入数字编号，如 /resume 1")
+            return
+        session = session_router.get_by_short_id(user_id, short_id)
+        if not session:
+            reply_message(message_id, f"❌ 未找到会话 #{short_id}，发送 /sessions 查看列表。")
+            return
+        session_router.touch(user_id, session["kiro_session_id"])
+        reply_message(message_id, f"🔄 已恢复会话 #{short_id} {session['topic']}\n继续发消息即可。")
+        return
+    if user_text.strip() == "/sessions":
+        reply_message(message_id, session_router.list_sessions(user_id))
+        return
+    if user_text.strip() == "/status":
+        status = kiro_executor.get_status(user_id)
+        reply_message(message_id, status or "没有正在运行的后台任务。")
+        return
+    if user_text.strip() == "/cancel":
+        reply_message(message_id, kiro_executor.cancel(user_id))
+        return
+
+    # ---- 检查是否有后台任务在跑 ----
+    if kiro_executor.is_busy(user_id):
+        reply_message(message_id, "⏳ 上一个任务还在后台运行中，请等待完成或发送 /cancel 取消。")
         return
 
     reply_message(message_id, "🤖 正在处理，请稍候...")
 
+    # ---- 记忆处理 ----
     mem_enabled = ENABLE_MEMORY and memory and memory.is_enabled(user_id)
-
-    # 立即存储用户原文（确保下次对话可用）
     if mem_enabled:
         memory.add(user_id, f"用户说：{user_text}")
-        log.info(f"已存储用户消息到记忆")
-
-    # 检索相关记忆
-    if mem_enabled:
-        memories = memory.search(user_id, user_text)
-    else:
-        memories = []
-
+    memories = memory.search(user_id, user_text) if mem_enabled else []
     if memories:
-        mem_text = "\n".join(f"- {m}" for m in memories)
-        prompt = f"关于这个用户的已知信息：\n{mem_text}\n\n用户消息：{user_text}"
-        log.info(f"命中 {len(memories)} 条记忆")
+        prompt = "关于这个用户的已知信息：\n" + "\n".join(f"- {m}" for m in memories) + f"\n\n用户消息：{user_text}"
     else:
         prompt = user_text
 
-    kiro_response = call_kiro(prompt)
-    reply_message(message_id, kiro_response)
+    # ---- 会话路由 ----
+    session_id = session_router.resolve(user_id, user_text)
+    is_new = session_id is None
 
-    # 自动检测 Kiro 输出中的图片/文件路径并发送
-    images, files = extract_file_paths(kiro_response)
+    # ---- 回调函数 ----
+    def on_sync_result(output: str):
+        _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled)
+
+    def on_async_start():
+        reply_message(message_id, "⏳ 任务较复杂，已转入后台处理。完成后会主动推送结果。\n发送 /status 查看进度，/cancel 取消。")
+
+    def on_async_result(output: str):
+        _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled)
+
+    # ---- 执行 ----
+    kiro_executor.execute(prompt, session_id, user_id, on_sync_result, on_async_start, on_async_result)
+
+
+def _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled):
+    """统一的结果投递：回复文本 + 文件 + session 更新 + 记忆"""
+    if is_new:
+        session_router.register_new(user_id, user_text[:30])
+        sessions = session_router._data.get(user_id, [])
+        sid = sessions[-1]["kiro_session_id"] if sessions else None
+    else:
+        sid = session_id
+        session_router.touch(user_id, session_id)
+
+    suffix = ""
+    if has_decision_signal(output):
+        suffix += "\n\n💡 回复消息继续当前对话（自动延续上下文）"
+    if sid:
+        suffix += session_router.get_active_label(user_id, sid)
+
+    reply_message(message_id, output + suffix)
+
+    images, files = extract_file_paths(output)
     for img_path in images:
         key = upload_image(img_path)
         if key:
             reply_image(message_id, key)
-            log.info(f"已发送图片: {img_path}")
     for file_path in files:
         key = upload_file(file_path)
         if key:
             reply_file(message_id, key)
-            log.info(f"已发送文件: {file_path}")
 
-    # 异步提取结构化记忆（补充）
     if mem_enabled:
-        conversation = f"用户：{user_text}\n助手：{kiro_response}"
+        conversation = f"用户：{user_text}\n助手：{output}"
         threading.Thread(target=memory.extract_and_store, args=(user_id, conversation), daemon=True).start()
 
 
