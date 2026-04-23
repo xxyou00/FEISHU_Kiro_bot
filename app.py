@@ -24,8 +24,11 @@ ENABLE_MEMORY = os.environ.get("ENABLE_MEMORY", "false").lower() in ("true", "1"
 if ENABLE_MEMORY:
     try:
         from memory import MemoryLayer
-    except ImportError:
-        logging.warning("记忆依赖未安装（chromadb/sentence-transformers），已自动关闭记忆功能")
+        from event_store import EventStore
+        from prompt_builder import build_prompt, has_episodic_hint
+        from event_ingest import parse_manual_command, ingest_to_store
+    except ImportError as _e:
+        logging.warning(f"记忆依赖未安装，已自动关闭记忆功能: {_e}")
         ENABLE_MEMORY = False
 
 # ============ 配置 ============
@@ -44,6 +47,7 @@ _processed_lock = threading.Lock()
 
 # ============ 记忆层 ============
 memory = MemoryLayer() if ENABLE_MEMORY else None
+event_store = EventStore() if ENABLE_MEMORY else None
 
 # ============ 飞书客户端 ============
 client = lark.Client.builder() \
@@ -254,6 +258,13 @@ def handle_user_message(message_id: str, user_id: str, user_text: str):
         args = user_text[len("/memory"):].strip().lower()
         reply_message(message_id, handle_memory_command(user_id, args))
         return
+    if user_text.startswith("/event"):
+        if not ENABLE_MEMORY:
+            reply_message(message_id, "🧠 记忆功能未启用。")
+            return
+        args = user_text[len("/event"):].strip()
+        reply_message(message_id, handle_event_command(user_id, args))
+        return
 
     # ---- 新增命令 ----
     if user_text.strip() == "/new":
@@ -299,11 +310,23 @@ def handle_user_message(message_id: str, user_id: str, user_text: str):
     mem_enabled = ENABLE_MEMORY and memory and memory.is_enabled(user_id)
     if mem_enabled:
         memory.add(user_id, f"用户说：{user_text}")
-    memories = memory.search(user_id, user_text) if mem_enabled else []
-    if memories:
-        prompt = "关于这个用户的已知信息：\n" + "\n".join(f"- {m}" for m in memories) + f"\n\n用户消息：{user_text}"
-    else:
-        prompt = user_text
+
+    semantic_memories = memory.search(user_id, user_text) if mem_enabled else []
+
+    # 事件记忆检索：仅在消息涉及系统/运维场景时触发
+    episodic_memories = []
+    if mem_enabled and event_store and has_episodic_hint(user_text):
+        # 轻量实体提取：从用户消息中抽取候选资源名
+        raw_ents = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", user_text)
+        raw_ents += re.findall(r"[\u4e00-\u9fff]{2,}", user_text)
+        entities = [e for e in raw_ents if len(e) >= 2]
+        episodic_memories = event_store.search_events(
+            user_id, query=user_text, entities=entities or None, days=14, top_k=5
+        )
+        if episodic_memories:
+            log.info(f"为用户 {user_id} 检索到 {len(episodic_memories)} 条相关事件")
+
+    prompt = build_prompt(user_text, semantic_memories, episodic_memories)
 
     # ---- 会话路由 ----
     session_id = session_router.resolve(user_id, user_text)
@@ -311,13 +334,13 @@ def handle_user_message(message_id: str, user_id: str, user_text: str):
 
     # ---- 回调函数 ----
     def on_sync_result(output: str):
-        _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled)
+        _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled, len(episodic_memories))
 
     def on_async_start():
         reply_message(message_id, "⏳ 任务较复杂，已转入后台处理。完成后会主动推送结果。\n发送 /status 查看进度，/cancel 取消。")
 
     def on_async_result(output: str):
-        _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled)
+        _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled, len(episodic_memories))
 
     def on_progress(msg: str):
         send_message(user_id, msg)
@@ -326,7 +349,7 @@ def handle_user_message(message_id: str, user_id: str, user_text: str):
     kiro_executor.execute(prompt, session_id, user_id, on_sync_result, on_async_start, on_async_result, on_progress)
 
 
-def _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled):
+def _deliver_result(message_id, user_id, user_text, output, session_id, is_new, mem_enabled, episodic_count=0):
     """统一的结果投递：回复文本 + 文件 + session 更新 + 记忆"""
     if is_new:
         session_router.register_new(user_id, user_text[:30])
@@ -337,6 +360,8 @@ def _deliver_result(message_id, user_id, user_text, output, session_id, is_new, 
         session_router.touch(user_id, session_id)
 
     suffix = ""
+    if episodic_count > 0:
+        suffix += f"\n\n📎 本次分析关联了 {episodic_count} 条历史事件（/memory events 查看全部）"
     if has_decision_signal(output):
         suffix += "\n\n💡 回复消息继续当前对话（自动延续上下文）"
     if sid:
@@ -373,15 +398,57 @@ def handle_memory_command(user_id: str, args: str) -> str:
         enabled = memory.is_enabled(user_id)
         all_mem = memory.list_all(user_id)
         status = "开启 ✅" if enabled else "关闭 ❌"
-        return f"🧠 记忆状态：{status}\n📊 记忆条数：{len(all_mem)}"
+        return f"🧠 记忆状态：{status}\n📊 语义记忆条数：{len(all_mem)}"
+    elif args.startswith("events"):
+        sub = args[len("events"):].strip()
+        if sub == "clear":
+            if event_store:
+                event_store.clear(user_id)
+            return "🗑️ 已清除你的所有事件记录。"
+        else:
+            if not event_store:
+                return "📭 事件存储未启用。"
+            events = event_store.list_events(user_id, days=30, limit=20)
+            if not events:
+                return "📭 最近 30 天没有事件记录。"
+            lines = ["📋 最近事件（最近 30 天）：\n"]
+            for i, e in enumerate(events, 1):
+                ts = e.get("ts", "")[:10] if e.get("ts") else ""
+                lines.append(f"  {i}. [{e['event_type']}] {ts} {e['title']}")
+            lines.append(f"\n共 {len(events)} 条，发送 /memory events clear 可清空")
+            return "\n".join(lines)
     else:
         return (
             "🧠 记忆管理命令：\n"
             "/memory status - 查看记忆状态\n"
             "/memory on     - 开启记忆\n"
             "/memory off    - 关闭记忆\n"
-            "/memory clear  - 清除所有记忆"
+            "/memory clear  - 清除所有语义记忆\n"
+            "/memory events - 查看最近事件\n"
+            "/memory events clear - 清空事件记录"
         )
+
+
+def handle_event_command(user_id: str, args: str) -> str:
+    """处理 /event 手动录入命令"""
+    if not args.strip():
+        return (
+            "📝 事件录入命令：\n"
+            "/event 类型=系统变更 实体=test1,MySQL 标题=索引优化 描述=增加联合索引\n"
+            "\n支持字段：类型、实体（逗号分隔）、标题、描述、级别、来源"
+        )
+
+    record = parse_manual_command(args)
+    record["user_id"] = user_id
+
+    if not record.get("title"):
+        return "❌ 标题不能为空，请提供 标题=..."
+
+    result = ingest_to_store(event_store, record)
+    if result["ok"]:
+        return f"✅ 已记录事件 #{result['event_id'][:8]}：{record['title']}\n关联实体：{', '.join(record.get('entities', []))}"
+    else:
+        return f"❌ 录入失败：{result['error']}"
 
 
 # ============ 事件处理 ============

@@ -1,36 +1,38 @@
-"""轻量记忆层 - 基于 ChromaDB + 多语言 Embedding 的本地向量记忆存储"""
+"""轻量记忆层 —— Semantic Memory 基于 SQLite，Episodic Memory 基于 event_store
+
+改造后架构：
+- Semantic Memory（用户偏好/事实）→ SQLite 本地关键词检索，零向量依赖
+- Episodic Memory（系统事件）→ event_store.EventStore，见 event_store.py
+
+回退方案：如需恢复旧版 ChromaDB 实现，执行
+    cp memory_legacy.py memory.py
+    # 并重新安装 chromadb + sentence-transformers
+"""
 import hashlib
-import logging
-import subprocess
-import os
 import json
+import logging
+import os
+import subprocess
 from datetime import datetime
 
-import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from semantic_store import SemanticStore
 
 log = logging.getLogger("memory")
 
 KIRO_TIMEOUT = int(os.environ.get("KIRO_TIMEOUT", "120"))
-EMBEDDING_MODEL = os.environ.get(
-    "EMBEDDING_MODEL",
-    "/home/ubuntu/modelscope/paraphrase-multilingual-MiniLM-L12-v2",
-)
-
 SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "memory_settings.json")
 
 
 class MemoryLayer:
-    def __init__(self, db_path="./memory_db"):
-        self.ef = SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL)
-        self.client = chromadb.PersistentClient(path=db_path)
-        self.collection = self.client.get_or_create_collection(
-            name="chat_memory",
-            metadata={"hnsw:space": "cosine"},
-            embedding_function=self.ef,
-        )
+    """对外接口保持与改造前 100% 兼容"""
+
+    def __init__(self, db_path: str = "./memory_db"):
+        # db_path 保留接口兼容，实际作为 SQLite 存储目录
+        semantic_db = os.path.join(db_path, "semantic_memory.db")
+        os.makedirs(db_path, exist_ok=True)
+        self._semantic = SemanticStore(db_path=semantic_db)
         self._settings = self._load_settings()
-        log.info(f"记忆层初始化完成，已有 {self.collection.count()} 条记忆")
+        log.info(f"记忆层初始化完成，语义记忆 {self._semantic.count()} 条")
 
     # ---- 用户设置持久化 ----
     def _load_settings(self) -> dict:
@@ -51,26 +53,27 @@ class MemoryLayer:
         self._settings.setdefault(user_id, {})["enabled"] = enabled
         self._save_settings()
 
+    # ---- Semantic Memory 接口 ----
     def add(self, user_id: str, text: str):
-        """存入一条记忆（自动去重）"""
-        doc_id = hashlib.md5(f"{user_id}:{text}".encode()).hexdigest()
-        self.collection.upsert(
-            ids=[doc_id],
-            documents=[text],
-            metadatas=[{"user_id": user_id, "ts": datetime.now().isoformat()}],
-        )
+        """存入一条语义记忆（自动去重）"""
+        self._semantic.add(user_id, text)
 
     def search(self, user_id: str, query: str, top_k: int = 5) -> list[str]:
-        """检索与 query 相关的记忆"""
-        if self.collection.count() == 0:
-            return []
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=top_k,
-            where={"user_id": user_id},
-        )
-        return results["documents"][0] if results["documents"] else []
+        """检索与 query 相关的语义记忆"""
+        return self._semantic.search(user_id, query, top_k)
 
+    def list_all(self, user_id: str) -> list[str]:
+        """列出某用户的所有语义记忆（调试用）"""
+        return self._semantic.list_all(user_id)
+
+    def count(self) -> int:
+        return self._semantic.count()
+
+    def clear(self, user_id: str = None):
+        """清除记忆（调试用）"""
+        self._semantic.clear(user_id)
+
+    # ---- 记忆提取（保留原有 kiro-cli 提取逻辑）----
     def extract_and_store(self, user_id: str, conversation: str):
         """用 kiro-cli 从对话中提取值得记住的信息"""
         prompt = (
@@ -94,26 +97,3 @@ class MemoryLayer:
                     log.info(f"新记忆 [{user_id}]: {line}")
         except Exception as e:
             log.warning(f"记忆提取失败: {e}")
-
-    def list_all(self, user_id: str) -> list[str]:
-        """列出某用户的所有记忆（调试用）"""
-        results = self.collection.get(where={"user_id": user_id})
-        return results["documents"] if results["documents"] else []
-
-    def count(self) -> int:
-        return self.collection.count()
-
-    def clear(self, user_id: str = None):
-        """清除记忆（调试用）"""
-        if user_id:
-            results = self.collection.get(where={"user_id": user_id})
-            if results["ids"]:
-                self.collection.delete(ids=results["ids"])
-        else:
-            # 清空整个集合
-            self.client.delete_collection("chat_memory")
-            self.collection = self.client.get_or_create_collection(
-                name="chat_memory",
-                metadata={"hnsw:space": "cosine"},
-                embedding_function=self.ef,
-            )
