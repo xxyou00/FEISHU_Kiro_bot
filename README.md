@@ -192,6 +192,63 @@ sudo journalctl -u feishu-kiro-bot -f
 
 ---
 
+## 💬 多轮对话
+
+### 会话自动延续
+
+Bot 默认会自动延续同一话题的上下文。如果 **30 分钟内**继续发消息，会自动 resume 到同一会话，Kiro CLI 会携带完整历史上下文进行推理。
+
+### 显式会话管理
+
+当需要切换话题时，使用以下命令：
+
+| 命令 | 说明 |
+|------|------|
+| `/new` | 强制开启新会话，下条消息不受历史上下文影响 |
+| `/sessions` | 查看最近 10 个历史会话 |
+| `/resume <编号>` | 恢复某个历史会话，继续之前的对话 |
+
+> 💡 **提示**：如果 Bot 的回复偏离了当前话题（比如 resume 到了旧会话），发送 `/new` 即可重置。
+
+---
+
+## ⏰ 定时任务
+
+通过自然语言配置周期性任务，Bot 会在指定时间自动执行 Kiro 指令并将结果推送给你。
+
+**用法示例：**
+```
+/schedule 每天上午9点检查 AWS 费用
+/schedule 每周一凌晨2点备份数据库
+/schedule 每30分钟检查 EC2 实例状态
+```
+
+**管理命令：**
+```
+/schedule list      # 列出所有定时任务
+/schedule delete 1  # 删除编号 1 的任务
+/schedule help      # 查看帮助
+```
+
+---
+
+## 📎 图片与文件发送
+
+Bot 支持自动检测 Kiro 输出中的文件路径，并上传到飞书发送：
+
+- **图片**：`.png` `.jpg` `.jpeg` `.gif` `.bmp` `.webp` → 以图片消息回复
+- **文件**：`.pdf` `.doc` `.docx` `.xls` `.xlsx` `.ppt` `.pptx` `.csv` `.txt` `.zip` `.mp4` → 以文件消息回复
+
+**工作流程：**
+1. 你向 Bot 发送请求（如"生成 CPU 趋势图"）
+2. Kiro 处理并生成文件，输出中包含绝对路径（如 `/tmp/report/cpu.png`）
+3. Bot 自动检测到存在的文件路径
+4. 上传至飞书，以图片/文件消息回复
+
+> **注意**：需在飞书开放平台开通 `im:resource` 权限（上传图片/文件）。
+
+---
+
 ## ⌨️ 命令参考
 
 | 命令 | 说明 |
@@ -215,35 +272,6 @@ pip3 install lark-oapi
 ```
 
 > 记忆功能为零额外依赖（基于 sqlite3）。如需恢复旧版向量记忆，需手动安装 `chromadb sentence-transformers`。
-
----
-
-## 🧪 测试
-
-```bash
-# 全部测试
-python3 test_event_store.py
-python3 test_memory.py
-python3 test_prompt_builder.py
-python3 test_event_ingest.py
-python3 test_step3_integration.py
-python3 test_step5_integration.py
-python3 test_performance.py
-python3 test_rollback.py
-```
-
----
-
-## 🔄 回退方案
-
-如需恢复改造前的 ChromaDB 版本：
-
-```bash
-sudo systemctl stop feishu-kiro-bot
-git reset --hard backup/before-memory-rewrite
-# 重新安装旧依赖：pip3 install chromadb sentence-transformers
-sudo systemctl start feishu-kiro-bot
-```
 
 ---
 

@@ -193,6 +193,63 @@ Memory is disabled by default. Set `ENABLE_MEMORY=true` in `.env` to enable.
 
 ---
 
+## 💬 Multi-Turn Conversations
+
+### Automatic Session Continuation
+
+By default, the bot automatically continues the context of the same topic. If you send another message **within 30 minutes**, it will auto-resume the same session, and Kiro CLI will carry the full conversation history for reasoning.
+
+### Explicit Session Management
+
+When you need to switch topics, use these commands:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Force start a new session; next message will not be affected by historical context |
+| `/sessions` | View the 10 most recent historical sessions |
+| `/resume <id>` | Resume a specific historical session and continue the previous conversation |
+
+> 💡 **Tip**: If the bot's reply drifts off-topic (e.g., resumed an old session), send `/new` to reset.
+
+---
+
+## ⏰ Scheduled Tasks
+
+Configure periodic tasks via natural language. The bot will automatically execute Kiro commands at the specified time and push results to you.
+
+**Usage examples:**
+```
+/schedule check AWS cost every day at 9am
+/schedule backup database every Monday at 2am
+/schedule check EC2 instance status every 30 minutes
+```
+
+**Management commands:**
+```
+/schedule list      # List all scheduled tasks
+/schedule delete 1  # Delete task #1
+/schedule help      # Show help
+```
+
+---
+
+## 📎 Image & File Delivery
+
+The bot supports automatic detection of file paths in Kiro output and uploads them to Feishu:
+
+- **Images**: `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.webp` → sent as image messages
+- **Files**: `.pdf` `.doc` `.docx` `.xls` `.xlsx` `.ppt` `.pptx` `.csv` `.txt` `.zip` `.mp4` → sent as file messages
+
+**Workflow:**
+1. You send a request to the bot (e.g., "generate a CPU trend chart")
+2. Kiro processes and generates a file, outputting an absolute path (e.g., `/tmp/report/cpu.png`)
+3. The bot automatically detects the existing file path
+4. Uploads to Feishu and replies as an image/file message
+
+> **Note**: Requires `im:resource` permission in the Feishu Open Platform (for uploading images/files).
+
+---
+
 ## ⌨️ Command Reference
 
 | Command | Description |
@@ -216,35 +273,6 @@ pip3 install lark-oapi
 ```
 
 > Memory features require zero extra dependencies (sqlite3 built-in). To restore legacy vector memory, manually install `chromadb sentence-transformers`.
-
----
-
-## 🧪 Testing
-
-```bash
-# Full test suite
-python3 test_event_store.py
-python3 test_memory.py
-python3 test_prompt_builder.py
-python3 test_event_ingest.py
-python3 test_step3_integration.py
-python3 test_step5_integration.py
-python3 test_performance.py
-python3 test_rollback.py
-```
-
----
-
-## 🔄 Rollback
-
-To restore the pre-rewrite ChromaDB version:
-
-```bash
-sudo systemctl stop feishu-kiro-bot
-git reset --hard backup/before-memory-rewrite
-# Re-install legacy deps: pip3 install chromadb sentence-transformers
-sudo systemctl start feishu-kiro-bot
-```
 
 ---
 
