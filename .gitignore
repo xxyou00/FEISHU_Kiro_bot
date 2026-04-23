@@ -5,4 +5,4 @@ memory_db/
 test_memory_db/
 memory_settings.json
 scheduled_jobs.json
-user_sessions.json
+user_sessions.json.kiro/
