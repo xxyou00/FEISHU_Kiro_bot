@@ -12,6 +12,10 @@ async function api(path, opts = {}) {
   }
   const res = await fetch(BASE + path, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    window.location.href = "/dashboard/#/login";
+    throw new Error("Unauthorized");
+  }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
@@ -19,31 +23,50 @@ async function api(path, opts = {}) {
 /* ---------- Layout ---------- */
 const AppLayout = {
   template: `
-    <div class="sidebar" v-if="!isLogin">
-      <div class="brand">Kiro Dashboard</div>
-      <nav>
-        <router-link to="/">总览</router-link>
-        <router-link to="/agents">Agents</router-link>
-        <router-link to="/skills">Skills</router-link>
-        <router-link to="/events">Events</router-link>
-        <router-link to="/scheduler">Scheduler</router-link>
-        <router-link to="/config">Config</router-link>
-      </nav>
-      <div class="logout" @click="logout">退出登录</div>
+    <div v-if="!authChecked" class="login-wrap">
+      <div class="login-box"><p>加载中...</p></div>
     </div>
-    <div :class="isLogin ? '' : 'main'">
-      <router-view />
-    </div>
+    <template v-else>
+      <div class="sidebar" v-if="!isLogin">
+        <div class="brand">Kiro Dashboard</div>
+        <nav>
+          <router-link to="/">总览</router-link>
+          <router-link to="/agents">Agents</router-link>
+          <router-link to="/skills">Skills</router-link>
+          <router-link to="/events">Events</router-link>
+          <router-link to="/scheduler">Scheduler</router-link>
+          <router-link to="/config">Config</router-link>
+        </nav>
+        <div class="logout" @click="logout">退出登录</div>
+      </div>
+      <div :class="isLogin ? '' : 'main'">
+        <router-view />
+      </div>
+    </template>
   `,
   setup() {
     const route = VueRouter.useRoute();
     const router = VueRouter.useRouter();
     const isLogin = computed(() => route.path === "/login");
+    const authChecked = ref(false);
+    onMounted(async () => {
+      if (isLogin.value) {
+        authChecked.value = true;
+        return;
+      }
+      try {
+        await api("/agents");
+        authChecked.value = true;
+      } catch (e) {
+        authChecked.value = true;
+      }
+    });
     async function logout() {
       await api("/logout", { method: "POST" }).catch(() => {});
+      authChecked.value = false;
       router.push("/login");
     }
-    return { isLogin, logout };
+    return { isLogin, logout, authChecked };
   }
 };
 
