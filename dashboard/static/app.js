@@ -104,10 +104,10 @@ const OverviewPage = {
     <div>
       <h2 class="page-title">总览</h2>
       <div class="cards">
-        <div class="card"><h3>Events</h3><div class="num">{{ counts.events }}</div></div>
-        <div class="card"><h3>Active Jobs</h3><div class="num">{{ counts.jobs }}</div></div>
-        <div class="card"><h3>Agents</h3><div class="num">{{ counts.agents }}</div></div>
-        <div class="card"><h3>Skills</h3><div class="num">{{ counts.skills }}</div></div>
+        <div class="card card-accent-blue"><h3>Events</h3><div class="num">{{ counts.events }}</div></div>
+        <div class="card card-accent-green"><h3>Active Jobs</h3><div class="num">{{ counts.jobs }}</div></div>
+        <div class="card card-accent-purple"><h3>Agents</h3><div class="num">{{ counts.agents }}</div></div>
+        <div class="card card-accent-orange"><h3>Skills</h3><div class="num">{{ counts.skills }}</div></div>
       </div>
     </div>
   `,
