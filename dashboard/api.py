@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Dashboard API routes for agents, skills, config, and mappings."""
 
+import json
 import os
 from flask import jsonify, request
 
 from dashboard import dashboard_bp, require_auth
 from dashboard.kiro_scanner import list_agents, list_skills
 from dashboard.config_store import ConfigStore, CORE_KEYS
+from event_ingest import webhook_handler, ingest_to_store
+from event_store import EventStore
 
 
 SENSITIVE_KEYS = {"WEBHOOK_TOKEN", "DASHBOARD_TOKEN"}
@@ -61,4 +64,74 @@ def post_mappings():
     store = ConfigStore(env_path=os.environ.get("ENV_PATH", ".env"))
     mappings = payload.get("mappings", [])
     store.write_mappings(mappings)
+    return jsonify({"ok": True})
+
+
+@dashboard_bp.route("/api/dashboard/events", methods=["GET"])
+@require_auth
+def get_events():
+    source = request.args.get("source")
+    severity = request.args.get("severity")
+    event_type = request.args.get("event_type")
+    q = request.args.get("q")
+    limit = request.args.get("limit", 50, type=int)
+    offset = request.args.get("offset", 0, type=int)
+
+    where_clauses = []
+    params = []
+
+    if source:
+        where_clauses.append("source = ?")
+        params.append(source)
+    if severity:
+        where_clauses.append("severity = ?")
+        params.append(severity)
+    if event_type:
+        where_clauses.append("event_type = ?")
+        params.append(event_type)
+    if q:
+        where_clauses.append("(title LIKE ? OR description LIKE ?)")
+        params.append(f"%{q}%")
+        params.append(f"%{q}%")
+
+    sql = "SELECT * FROM events"
+    if where_clauses:
+        sql += " WHERE " + " AND ".join(where_clauses)
+    sql += " ORDER BY ts DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    store = EventStore()
+    with store._conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        events = []
+        for row in rows:
+            d = dict(row)
+            d["entities"] = json.loads(d["entities"])
+            events.append(d)
+
+    return jsonify({"ok": True, "events": events})
+
+
+@dashboard_bp.route("/api/dashboard/events", methods=["POST"])
+@require_auth
+def post_event():
+    payload = request.get_json(silent=True) or {}
+    default_user_id = os.environ.get("ALERT_NOTIFY_USER_ID", "system")
+    record = webhook_handler(payload, default_user_id=default_user_id)
+    if not record.get("ok"):
+        return jsonify(record), 400
+    result = ingest_to_store(EventStore(), record)
+    if not result.get("ok"):
+        status = 500 if result.get("error", "").startswith("内部错误") else 400
+        return jsonify(result), status
+    return jsonify(result)
+
+
+@dashboard_bp.route("/api/dashboard/events/<event_id>", methods=["DELETE"])
+@require_auth
+def delete_event(event_id):
+    store = EventStore()
+    with store._conn() as conn:
+        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        conn.commit()
     return jsonify({"ok": True})
