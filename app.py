@@ -24,6 +24,11 @@ try:
 except ImportError:
     Flask = None  # webhook 功能可选
 
+try:
+    from dashboard import dashboard_bp
+except ImportError:
+    dashboard_bp = None
+
 ENABLE_MEMORY = os.environ.get("ENABLE_MEMORY", "false").lower() in ("true", "1", "yes")
 if ENABLE_MEMORY:
     try:
@@ -508,6 +513,9 @@ def on_message_receive(data: P2ImMessageReceiveV1) -> None:
 
 # ============ Webhook 接收 + Kiro Skill 触发（EC2 告警分析） ============
 webhook_app = Flask("kiro-ec2-webhook") if Flask else None
+
+if webhook_app and dashboard_bp:
+    webhook_app.register_blueprint(dashboard_bp)
 
 def _trigger_ec2_skill_analysis(record: dict):
     """将 EC2 告警数据交给 Kiro ec2-alert-analyzer skill 分析，然后推送结果"""

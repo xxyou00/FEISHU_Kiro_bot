@@ -106,3 +106,7 @@ def dashboard_index():
         dashboard_bp.static_folder or "static",
         "index.html",
     )
+
+
+# Register API routes
+import dashboard.api  # noqa: F401
