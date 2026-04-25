@@ -455,6 +455,7 @@ tr.pinned td:first-child { border-left: 3px solid #f59e0b; }
 }
 .pin-btn:hover { color: #f59e0b; }
 tr.pinned .pin-btn { color: #f59e0b; }
+tr.pinned:hover td { background: #f1f5f9; }
 .badge-ec2 { background: #eff6ff; color: #2563eb; }
 .badge-rds { background: #f5f3ff; color: #7c3aed; }
 .badge-eks { background: #fff7ed; color: #c2410c; }
