@@ -35,6 +35,7 @@ const AppLayout = {
           <router-link to="/skills">Skills</router-link>
           <router-link to="/events">Events</router-link>
           <router-link to="/scheduler">Scheduler</router-link>
+          <router-link to="/resources">Resources</router-link>
           <router-link to="/config">Config</router-link>
         </nav>
         <div class="logout" @click="logout">退出登录</div>
@@ -540,6 +541,19 @@ const SchedulerPage = {
   }
 };
 
+/* ---------- ResourcesPage ---------- */
+const ResourcesPage = {
+  template: `
+    <div>
+      <h2 class="page-title">Resources</h2>
+      <p style="color:#94a3b8">加载中...</p>
+    </div>
+  `,
+  setup() {
+    return {};
+  }
+};
+
 /* ---------- ConfigPage ---------- */
 const ConfigPage = {
   template: `
@@ -695,6 +709,7 @@ const routes = [
   { path: "/skills", component: SkillsPage },
   { path: "/events", component: EventsPage },
   { path: "/scheduler", component: SchedulerPage },
+  { path: "/resources", component: ResourcesPage },
   { path: "/config", component: ConfigPage },
 ];
 
