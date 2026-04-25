@@ -230,15 +230,11 @@ setup_memory() {
     local current
     current=$(get_env_var "ENABLE_MEMORY" "false")
 
-    echo "记忆功能需要 chromadb 和 sentence-transformers"
+    echo "记忆功能基于 SQLite，零额外依赖"
     echo ""
     read -p "启用记忆功能？(y/N) [当前: ${current}]: " mem
     if [[ "$mem" == "y" || "$mem" == "Y" ]]; then
         update_env_var "ENABLE_MEMORY" "true"
-        if ! python3 -c "import chromadb" 2>/dev/null; then
-            warn "chromadb 未安装，记忆功能可能无法正常工作"
-            echo "  安装命令: pip3 install chromadb sentence-transformers"
-        fi
         success "记忆功能已启用"
     else
         update_env_var "ENABLE_MEMORY" "false"
