@@ -9,24 +9,32 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # -----------------------------------------------------------------------------
-# 颜色定义
+# 确保用 bash 执行
 # -----------------------------------------------------------------------------
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+if [ -z "$BASH_VERSION" ]; then
+    echo "请用 bash 执行此脚本: bash $0"
+    exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# 颜色定义 (POSIX printf，兼容所有 shell)
+# -----------------------------------------------------------------------------
+RED=$(printf '\033[0;31m')
+GREEN=$(printf '\033[0;32m')
+YELLOW=$(printf '\033[1;33m')
+BLUE=$(printf '\033[0;34m')
+CYAN=$(printf '\033[0;36m')
+BOLD=$(printf '\033[1m')
+NC=$(printf '\033[0m') # No Color
 
 # -----------------------------------------------------------------------------
 # 工具函数
 # -----------------------------------------------------------------------------
-info()    { echo -e "${BLUE}ℹ ${NC}$1"; }
-success() { echo -e "${GREEN}✅ ${NC}$1"; }
-warn()    { echo -e "${YELLOW}⚠️  ${NC}$1"; }
-error()   { echo -e "${RED}❌ ${NC}$1"; }
-header()  { echo -e "\n${BOLD}${CYAN}$1${NC}"; echo -e "${CYAN}$(printf '=%.0s' $(seq 1 ${#1}))${NC}\n"; }
+info()    { printf "%b\n" "${BLUE}ℹ ${NC}$1"; }
+success() { printf "%b\n" "${GREEN}✅ ${NC}$1"; }
+warn()    { printf "%b\n" "${YELLOW}⚠️  ${NC}$1"; }
+error()   { printf "%b\n" "${RED}❌ ${NC}$1"; }
+header()  { printf "%b\n" "\n${BOLD}${CYAN}$1${NC}"; printf "%b\n" "${CYAN}$(printf '=%.0s' $(seq 1 ${#1}))${NC}\n"; }
 
 # 检查命令是否存在
 command_exists() {
@@ -401,7 +409,7 @@ EOF
 
     success "systemd 服务已安装"
     echo ""
-    echo -e "${CYAN}管理命令:${NC}"
+    printf "%b\n" "${CYAN}管理命令:${NC}"
     echo "  启动: ${BOLD}sudo systemctl start kiro-devops${NC}"
     echo "  停止: ${BOLD}sudo systemctl stop kiro-devops${NC}"
     echo "  状态: ${BOLD}sudo systemctl status kiro-devops${NC}"
@@ -463,14 +471,14 @@ start_test() {
 show_menu() {
     clear 2>/dev/null || true
     echo ""
-    echo -e "${BOLD}${CYAN}╔════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${CYAN}║${NC}     ${BOLD}kiro-devops 一键部署助手${NC}                    ${CYAN}║${NC}"
-    echo -e "${BOLD}${CYAN}╠════════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${NC}  支持平台: 飞书(Lark) | 微信(iLink)             ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  功能: Kiro CLI 桥接 | 记忆 | 告警 | Dashboard   ${CYAN}║${NC}"
-    echo -e "${BOLD}${CYAN}╚════════════════════════════════════════════════════╝${NC}"
+    printf "%b\n" "${BOLD}${CYAN}╔════════════════════════════════════════════════════╗${NC}"
+    printf "%b\n" "${BOLD}${CYAN}║${NC}     ${BOLD}kiro-devops 一键部署助手${NC}                    ${CYAN}║${NC}"
+    printf "%b\n" "${BOLD}${CYAN}╠════════════════════════════════════════════════════╣${NC}"
+    printf "%b\n" "${CYAN}║${NC}  支持平台: 飞书(Lark) | 微信(iLink)             ${CYAN}║${NC}"
+    printf "%b\n" "${CYAN}║${NC}  功能: Kiro CLI 桥接 | 记忆 | 告警 | Dashboard   ${CYAN}║${NC}"
+    printf "%b\n" "${BOLD}${CYAN}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${BOLD}请选择部署模式：${NC}"
+    printf "%b\n" "${BOLD}请选择部署模式：${NC}"
     echo ""
     echo "  ${GREEN}[1]${NC} 仅飞书          — 企业 IM 接入"
     echo "  ${GREEN}[2]${NC} 仅微信          — 个人微信接入"
@@ -547,18 +555,18 @@ main() {
 
     # 完成提示
     echo ""
-    echo -e "${GREEN}╔════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${NC}           ${BOLD}🎉 配置完成！${NC}                          ${GREEN}║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════╝${NC}"
+    printf "%b\n" "${GREEN}╔════════════════════════════════════════════════════╗${NC}"
+    printf "%b\n" "${GREEN}║${NC}           ${BOLD}🎉 配置完成！${NC}                          ${GREEN}║${NC}"
+    printf "%b\n" "${GREEN}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "配置已保存到: ${BOLD}.env${NC}"
+    printf "%b\n" "配置已保存到: ${BOLD}.env${NC}"
     echo ""
-    echo -e "${CYAN}常用命令:${NC}"
+    printf "%b\n" "${CYAN}常用命令:${NC}"
     echo "  前台运行:  ${BOLD}./start.sh${NC} 或 ${BOLD}source .env && python3 gateway.py${NC}"
     echo "  查看日志:  ${BOLD}tail -f /tmp/gateway.log${NC}"
     echo "  编辑配置:  ${BOLD}nano .env${NC}"
     echo ""
-    echo -e "${CYAN}打包建议:${NC}"
+    printf "%b\n" "${CYAN}打包建议:${NC}"
     echo "  • systemd: sudo systemctl start kiro-devops"
     echo "  • Docker:  docker build -t kiro-devops . && docker run -d kiro-devops"
     echo "  • 裸机:    nohup ./start.sh &"
