@@ -71,3 +71,82 @@ def fetch_cloudwatch_hourly(resource, metric_name="CPUUtilization", hours=24, en
         ts = ts // 3600 * 3600
         records.append((resource.id, metric_name, ts, round(p["Average"], 2), region))
     return records
+
+
+def run_backfill(base_dir=None):
+    store = MetricsStore(base_dir=base_dir)
+    resources = discover_all()
+    logger.info(f"Discovered {len(resources)} resources for backfill")
+    total = 0
+    for resource in resources:
+        try:
+            records = fetch_cloudwatch_hourly(resource, hours=24 * 30)
+            if records:
+                store.write_hourly(records)
+                total += len(records)
+                logger.info(f"Backfilled {len(records)} points for {resource.id}")
+        except Exception as e:
+            logger.warning(f"Backfill failed for {resource.id}: {e}")
+    store.close()
+    logger.info(f"Backfill complete: {total} total points")
+    return total
+
+
+def run_incremental(base_dir=None):
+    store = MetricsStore(base_dir=base_dir)
+    resources = discover_all()
+    logger.info(f"Discovered {len(resources)} resources for incremental sync")
+    total = 0
+    for resource in resources:
+        try:
+            records = fetch_cloudwatch_hourly(resource, hours=24)
+            if records:
+                store.write_hourly(records)
+                total += len(records)
+                logger.info(f"Synced {len(records)} points for {resource.id}")
+        except Exception as e:
+            logger.warning(f"Sync failed for {resource.id}: {e}")
+
+    # Downsample previous month if it has just completed
+    now = datetime.datetime.utcnow()
+    prev_month = now.month - 1 or 12
+    prev_year = now.year if now.month > 1 else now.year - 1
+    try:
+        inserted = store.downsample_month(prev_year, prev_month)
+        if inserted:
+            logger.info(f"Downsampled {inserted} daily rows for {prev_year}-{prev_month:02d}")
+    except Exception as e:
+        logger.warning(f"Downsample failed for {prev_year}-{prev_month:02d}: {e}")
+
+    # Cleanup old aggregated data
+    try:
+        deleted = store.cleanup_old_daily(keep_days=180)
+        if deleted:
+            logger.info(f"Cleaned up {deleted} old daily rows")
+    except Exception as e:
+        logger.warning(f"Cleanup failed: {e}")
+
+    store.close()
+    logger.info(f"Incremental sync complete: {total} total points")
+    return total
+
+
+def main():
+    args = parse_args()
+    if args.backfill:
+        run_backfill(base_dir=args.base_dir)
+    elif args.incremental:
+        run_incremental(base_dir=args.base_dir)
+    elif args.downsample:
+        year, month = args.downsample
+        store = MetricsStore(base_dir=args.base_dir)
+        inserted = store.downsample_month(year, month)
+        logger.info(f"Downsampled {inserted} rows for {year}-{month:02d}")
+        store.close()
+    else:
+        # Default to incremental
+        run_incremental(base_dir=args.base_dir)
+
+
+if __name__ == "__main__":
+    main()
