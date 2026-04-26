@@ -489,6 +489,92 @@ setup_dashboard() {
 }
 
 # -----------------------------------------------------------------------------
+# CloudWatch 指标同步 Cron 配置
+# -----------------------------------------------------------------------------
+setup_metrics_sync_cron() {
+    header "📊 CloudWatch 指标同步 Cron 配置"
+
+    # 检查 boto3 是否安装（必须依赖）
+    if ! python3 -c "import boto3" 2>/dev/null; then
+        warn "boto3 未安装，跳过指标同步 Cron 配置"
+        warn "如需使用，请先安装: pip3 install boto3"
+        return 0
+    fi
+
+    # 检查 AWS 凭证
+    local has_creds=false
+    if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        has_creds=true
+    elif [ -f "${HOME}/.aws/credentials" ] || [ -f "${HOME}/.aws/config" ]; then
+        has_creds=true
+    elif curl -s --connect-timeout 1 http://169.254.169.254/latest/meta-data/iam/security-credentials/ >/dev/null 2>&1; then
+        has_creds=true
+    fi
+
+    if [ "$has_creds" = false ]; then
+        warn "未找到 AWS 凭证，跳过指标同步 Cron 配置"
+        info "配置 AWS 凭证后，可手动运行: bash $SCRIPT_DIR/setup.sh 重新设置"
+        return 0
+    fi
+
+    local current_cron
+    current_cron=$(crontab -l 2>/dev/null | grep "sync_resource_metrics.py" || true)
+
+    if [ -n "$current_cron" ]; then
+        info "检测到已有指标同步 Cron 任务:"
+        echo "  $current_cron"
+        read -p "是否重新配置？(y/N): " reconfig
+        if [[ "$reconfig" != "y" && "$reconfig" != "Y" ]]; then
+            info "保留现有 Cron 配置"
+            return 0
+        fi
+        # 删除旧条目
+        crontab -l 2>/dev/null | grep -v "sync_resource_metrics.py" | crontab - 2>/dev/null || true
+    fi
+
+    echo ""
+    echo "将配置每日自动同步 AWS EC2/RDS 的 CloudWatch CPU 指标"
+    echo "  • 首次运行: 回溯填充过去 30 天数据"
+    echo "  • 日常运行: 每日凌晨同步前 24 小时数据"
+    echo "  • 数据存储: memory_db/raw_metrics_YYYY_MM.db + aggregated_metrics.db"
+    echo ""
+    read -p "启用 CloudWatch 指标同步定时任务？(y/N): " enable_cron
+
+    if [[ "$enable_cron" == "y" || "$enable_cron" == "Y" ]]; then
+        local cron_schedule="0 3 * * *"
+        read -p "Cron 调度表达式 [默认: 0 3 * * * (每日凌晨3点)]: " schedule_input
+        cron_schedule=${schedule_input:-$cron_schedule}
+
+        local log_file="/var/log/kiro-metrics-sync.log"
+        local cron_cmd="cd ${SCRIPT_DIR} && PYTHONPATH=${SCRIPT_DIR} /usr/bin/python3 ${SCRIPT_DIR}/scripts/sync_resource_metrics.py --incremental >> ${log_file} 2>&1"
+        local cron_entry="${cron_schedule} ${cron_cmd}"
+
+        # 添加到 crontab
+        (crontab -l 2>/dev/null || true; echo "$cron_entry") | crontab -
+
+        success "Cron 任务已添加"
+        info "调度: ${cron_schedule}"
+        info "日志: ${log_file}"
+        info "手动执行: PYTHONPATH=${SCRIPT_DIR} python3 ${SCRIPT_DIR}/scripts/sync_resource_metrics.py --backfill"
+
+        # 询问是否立即执行首次回溯填充
+        echo ""
+        read -p "是否立即执行首次回溯填充（同步过去30天数据）？(y/N): " backfill_now
+        if [[ "$backfill_now" == "y" || "$backfill_now" == "Y" ]]; then
+            info "开始回溯填充..."
+            if PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/scripts/sync_resource_metrics.py" --backfill; then
+                success "回溯填充完成"
+            else
+                error "回溯填充失败，请检查 AWS 权限和日志"
+            fi
+        fi
+    else
+        info "跳过 Cron 配置"
+        info "之后可随时手动运行: PYTHONPATH=${SCRIPT_DIR} python3 ${SCRIPT_DIR}/scripts/sync_resource_metrics.py --incremental"
+    fi
+}
+
+# -----------------------------------------------------------------------------
 # systemd 服务安装
 # -----------------------------------------------------------------------------
 install_systemd() {
@@ -568,6 +654,9 @@ EOF
             sudo journalctl -u kiro-devops --no-pager -n 20
         fi
     fi
+
+    # 安装 CloudWatch 指标同步 cron
+    setup_metrics_sync_cron
 }
 
 # -----------------------------------------------------------------------------
@@ -682,6 +771,7 @@ main() {
             setup_webhook
             setup_alert
             setup_dashboard
+            setup_metrics_sync_cron
             ;;
         5)
             install_systemd
