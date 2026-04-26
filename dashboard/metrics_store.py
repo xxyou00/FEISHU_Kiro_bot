@@ -147,10 +147,10 @@ class MetricsStore:
         cursor = conn.execute(
             """
             SELECT resource_id, metric_name, date(timestamp, 'unixepoch') as dt,
-                   MIN(value), AVG(value), MAX(value)
+                   MIN(value), AVG(value), MAX(value), region
             FROM hourly_metrics
             WHERE strftime('%Y-%m', datetime(timestamp, 'unixepoch')) = ?
-            GROUP BY resource_id, metric_name, date(timestamp, 'unixepoch')
+            GROUP BY resource_id, metric_name, date(timestamp, 'unixepoch'), region
             ORDER BY resource_id, metric_name, dt
             """,
             (f"{year}-{month:02d}",),
@@ -161,7 +161,7 @@ class MetricsStore:
 
         agg_conn = self._agg_conn()
         inserted = 0
-        for resource_id, metric_name, dt, min_val, avg_val, max_val in rows:
+        for resource_id, metric_name, dt, min_val, avg_val, max_val, region in rows:
             # Compute p95 from raw values
             p95_cursor = conn.execute(
                 """
@@ -186,7 +186,7 @@ class MetricsStore:
                     max_value=excluded.max_value,
                     region=excluded.region
                 """,
-                (resource_id, metric_name, dt, min_val, round(avg_val, 2), round(p95_val, 2), max_val, None),
+                (resource_id, metric_name, dt, min_val, round(avg_val, 2), round(p95_val, 2), max_val, region),
             )
             inserted += 1
         agg_conn.commit()
@@ -254,8 +254,10 @@ class MetricsStore:
                 resource_id, metric_name,
                 start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"),
             )
-            data = [{"timestamp": int(datetime.strptime(d["date"], "%Y-%m-%d").timestamp()), **d}
-                    for d in data_raw]
+            data = [
+                {"timestamp": int(datetime.strptime(d["date"], "%Y-%m-%d").timestamp()), "value": d["avg_value"]}
+                for d in data_raw
+            ]
             values = [d["avg_value"] for d in data_raw]
             stats = {
                 "min": round(min([d["min_value"] for d in data_raw]), 1) if data_raw else None,
