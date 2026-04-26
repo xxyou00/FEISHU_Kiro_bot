@@ -53,7 +53,8 @@ def test_downsample_and_query_daily():
         store.write_hourly(records)
 
         # Downsample
-        store.downsample_month(2026, 4)
+        count = store.downsample_month(2026, 4)
+        assert count == 1
 
         # Query daily
         result = store.query_daily("ec2:cn-north-1:i-123", "cpu_utilization", "2026-04-25", "2026-04-25")
@@ -98,4 +99,109 @@ def test_query_history_routes_to_daily():
         result = store.query_history("ec2:cn-north-1:i-123", "cpu_utilization", "180d")
         assert result["granularity"] == "daily"
         assert len(result["data"]) == 1
+        store.close()
+
+
+def test_write_hourly_upsert_updates_value():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MetricsStore(base_dir=tmpdir)
+        ts = 1714113600
+        store.write_hourly([
+            ("ec2:cn-north-1:i-123", "cpu_utilization", ts, 12.5, "cn-north-1"),
+        ])
+        store.write_hourly([
+            ("ec2:cn-north-1:i-123", "cpu_utilization", ts, 99.9, "cn-north-1"),
+        ])
+        result = store.query_hourly("ec2:cn-north-1:i-123", "cpu_utilization", ts, ts)
+        assert len(result) == 1
+        assert result[0]["value"] == 99.9
+        store.close()
+
+
+def test_query_hourly_cross_month():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MetricsStore(base_dir=tmpdir)
+        # March 31, 2026 23:00
+        march_ts = int(datetime(2026, 3, 31, 23, 0, 0).timestamp())
+        # April 1, 2026 01:00
+        april_ts = int(datetime(2026, 4, 1, 1, 0, 0).timestamp())
+        store.write_hourly([
+            ("ec2:cn-north-1:i-123", "cpu_utilization", march_ts, 10.0, "cn-north-1"),
+            ("ec2:cn-north-1:i-123", "cpu_utilization", april_ts, 20.0, "cn-north-1"),
+        ])
+        result = store.query_hourly("ec2:cn-north-1:i-123", "cpu_utilization", march_ts, april_ts)
+        assert len(result) == 2
+        assert result[0]["value"] == 10.0
+        assert result[1]["value"] == 20.0
+        store.close()
+
+
+def test_cleanup_old_daily():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MetricsStore(base_dir=tmpdir)
+        # Insert some daily aggregated data
+        base = int(datetime(2026, 4, 25, 0, 0, 0).timestamp())
+        store.write_hourly([
+            ("ec2:cn-north-1:i-123", "cpu_utilization", base + h * 3600, float(10 + h), "cn-north-1")
+            for h in range(24)
+        ])
+        store.downsample_month(2026, 4)
+
+        # Patch datetime.utcnow to simulate being 200 days later
+        with patch("dashboard.metrics_store.datetime") as mock_dt:
+            mock_dt.utcnow.return_value = datetime(2026, 11, 12, 0, 0, 0)
+            mock_dt.timedelta = __import__("datetime").timedelta
+            deleted = store.cleanup_old_daily(keep_days=180)
+
+        assert deleted >= 1
+        # Verify old data is gone
+        result = store.query_daily("ec2:cn-north-1:i-123", "cpu_utilization", "2026-04-25", "2026-04-25")
+        assert len(result) == 0
+        store.close()
+
+
+def test_downsample_returns_insert_count():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MetricsStore(base_dir=tmpdir)
+        base = int(datetime(2026, 4, 25, 0, 0, 0).timestamp())
+        store.write_hourly([
+            ("ec2:cn-north-1:i-123", "cpu_utilization", base + h * 3600, float(10 + h), "cn-north-1")
+            for h in range(24)
+        ])
+        count = store.downsample_month(2026, 4)
+        assert count == 1  # One day of data
+        store.close()
+
+
+def test_query_history_7d_routes_to_hourly():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MetricsStore(base_dir=tmpdir)
+        base = int(datetime(2026, 4, 25, 0, 0, 0).timestamp())
+        store.write_hourly([
+            ("ec2:cn-north-1:i-123", "cpu_utilization", base, 10.0, "cn-north-1"),
+        ])
+        with patch("dashboard.metrics_store.datetime") as mock_dt:
+            mock_dt.utcnow.return_value = datetime(2026, 4, 25, 12, 0, 0)
+            mock_dt.utcfromtimestamp = datetime.utcfromtimestamp
+            mock_dt.strptime = datetime.strptime
+            mock_dt.timedelta = __import__("datetime").timedelta
+            result = store.query_history("ec2:cn-north-1:i-123", "cpu_utilization", "7d")
+        assert result["granularity"] == "hourly"
+        store.close()
+
+
+def test_query_history_30d_routes_to_hourly():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = MetricsStore(base_dir=tmpdir)
+        base = int(datetime(2026, 4, 25, 0, 0, 0).timestamp())
+        store.write_hourly([
+            ("ec2:cn-north-1:i-123", "cpu_utilization", base, 10.0, "cn-north-1"),
+        ])
+        with patch("dashboard.metrics_store.datetime") as mock_dt:
+            mock_dt.utcnow.return_value = datetime(2026, 4, 25, 12, 0, 0)
+            mock_dt.utcfromtimestamp = datetime.utcfromtimestamp
+            mock_dt.strptime = datetime.strptime
+            mock_dt.timedelta = __import__("datetime").timedelta
+            result = store.query_history("ec2:cn-north-1:i-123", "cpu_utilization", "30d")
+        assert result["granularity"] == "hourly"
         store.close()
