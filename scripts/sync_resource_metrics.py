@@ -3,10 +3,6 @@
 import argparse
 import datetime
 import logging
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dashboard.resources import discover_all
 from dashboard.metrics_store import MetricsStore
@@ -27,7 +23,7 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def fetch_cloudwatch_hourly(resource, metric_name="CPUUtilization", hours=24, end=None):
+def fetch_cloudwatch_hourly(resource, metric_name="CPUUtilization", hours=24, end=None) -> list[tuple]:
     try:
         import boto3
     except ImportError:
@@ -73,7 +69,7 @@ def fetch_cloudwatch_hourly(resource, metric_name="CPUUtilization", hours=24, en
     return records
 
 
-def run_backfill(base_dir=None):
+def run_backfill(base_dir=None) -> int:
     store = MetricsStore(base_dir=base_dir)
     resources = discover_all()
     logger.info(f"Discovered {len(resources)} resources for backfill")
@@ -92,7 +88,7 @@ def run_backfill(base_dir=None):
     return total
 
 
-def run_incremental(base_dir=None):
+def run_incremental(base_dir=None) -> int:
     store = MetricsStore(base_dir=base_dir)
     resources = discover_all()
     logger.info(f"Discovered {len(resources)} resources for incremental sync")
@@ -131,7 +127,7 @@ def run_incremental(base_dir=None):
     return total
 
 
-def main():
+def main() -> None:
     args = parse_args()
     if args.backfill:
         run_backfill(base_dir=args.base_dir)
