@@ -240,6 +240,7 @@ def get_resources():
         return jsonify({
             "ok": True,
             "resources": resources,
+            "regions": data.get("regions", []),
             "pinned": pins,
             "cached": data.get("cached", False),
             "error": data.get("error"),

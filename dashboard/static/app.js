@@ -547,14 +547,16 @@ const ResourcesPage = {
     <div>
       <h2 class="page-title">Resources</h2>
       <div class="toolbar">
-        <button @click="load(true)" title="刷新">🔃</button>
         <select v-model="filterType" @change="load()">
           <option value="">全部类型</option>
           <option value="ec2">EC2</option>
           <option value="rds">RDS</option>
         </select>
         <input v-model="searchQ" placeholder="搜索 Name / ID" />
-        <input v-model="filterRegion" placeholder="Region" />
+        <select v-model="filterRegion">
+          <option value="">全部 Region</option>
+          <option v-for="reg in regions" :key="reg" :value="reg">{{ reg }}</option>
+        </select>
         <input v-model="filterStatus" placeholder="Status" />
         <input v-model="filterClass" placeholder="机型" />
         <input v-model="filterOs" placeholder="OS" />
@@ -593,7 +595,7 @@ const ResourcesPage = {
                 <td>{{ r.meta.region || '-' }}</td>
                 <td>{{ r.type === 'ec2' ? (r.meta.instance_type || '-') : (r.meta.db_instance_class || '-') }}</td>
                 <td>{{ r.type === 'ec2' ? (r.meta.os || '-') : (r.meta.engine || '-') }}</td>
-                <td><code class="tag">{{ r.raw_id }}</code></td>
+                <td><code class="tag" :title="r.id" style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;display:inline-block;white-space:nowrap;vertical-align:middle">{{ r.raw_id }}</code></td>
                 <td>{{ r.status }}</td>
                 <td>
                   <span v-for="(v, k) in r.tags" :key="k" class="badge badge-tag" :title="k + ': ' + v">
@@ -637,7 +639,7 @@ const ResourcesPage = {
               </td>
             </tr>
             </template>
-            <tr v-if="filteredResources.length === 0"><td colspan="12" class="empty">暂无数据</td></tr>
+            <tr v-if="filteredResources.length === 0"><td colspan="13" class="empty">暂无数据</td></tr>
           </tbody>
         </table>
       </div>
@@ -646,6 +648,7 @@ const ResourcesPage = {
   setup() {
     const resources = ref([]);
     const pins = ref([]);
+    const regions = ref([]);
     const filterType = ref("");
     const searchQ = ref("");
     const filterRegion = ref("");
@@ -753,6 +756,7 @@ const ResourcesPage = {
       const data = await api("/resources?" + qs.toString());
       resources.value = data.resources || [];
       pins.value = data.pinned || [];
+      regions.value = data.regions || [];
       reorder();
     }
     const filteredResources = computed(() => {
@@ -799,7 +803,7 @@ const ResourcesPage = {
     });
 
     onMounted(() => load());
-    return { resources, pins, filterType, searchQ, filterRegion, filterStatus, filterClass, filterOs, filterTagKey, filterTagValue, onlyPinned, isPinned, togglePin, sparklineSvg, sparklineColor, formatStats, resetFilters, filteredResources, load, expandedId, historyData, historyLoading, historyRange, historyRanges, toggleExpand, loadHistory, historyChartSvg };
+    return { resources, pins, regions, filterType, searchQ, filterRegion, filterStatus, filterClass, filterOs, filterTagKey, filterTagValue, onlyPinned, isPinned, togglePin, sparklineSvg, sparklineColor, formatStats, resetFilters, filteredResources, load, expandedId, historyData, historyLoading, historyRange, historyRanges, toggleExpand, loadHistory, historyChartSvg };
   }
 };
 

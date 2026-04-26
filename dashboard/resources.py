@@ -217,6 +217,7 @@ def get_all_resources_with_metrics(refresh=False):
 
     data = {
         "resources": [resource_to_dict(r) for r in resources],
+        "regions": _load_regions(),
         "cached": False,
         "error": None,
     }
