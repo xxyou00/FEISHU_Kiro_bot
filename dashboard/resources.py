@@ -5,6 +5,8 @@ import json
 import os
 import time
 
+from dashboard.providers.aws import AWSProvider
+
 
 @dataclass
 class Resource:
@@ -31,78 +33,47 @@ def _load_regions() -> list[str]:
     return []
 
 
-def discover_ec2(region: str | None = None):
-    try:
-        import boto3
-    except ImportError:
-        return []
-    kwargs = {"region_name": region} if region else {}
-    client = boto3.client("ec2", **kwargs)
-    region_name = region or client._client_config.region_name or ""
-    resp = client.describe_instances(
-        Filters=[{"Name": "instance-state-name", "Values": ["running", "stopped"]}]
+def _new_resource_to_old(resource):
+    """Translate new provider Resource to legacy Resource format."""
+    return Resource(
+        id=f"{resource.resource_type}:{resource.region}:{resource.id}",
+        type=resource.resource_type,
+        name=resource.name,
+        raw_id=resource.id,
+        status=resource.status,
+        meta=resource.meta,
+        tags=resource.tags,
     )
-    resources = []
-    for reservation in resp.get("Reservations", []):
-        for inst in reservation.get("Instances", []):
-            tags = {tag.get("Key", ""): tag.get("Value", "") for tag in inst.get("Tags", [])}
-            name = tags.get("Name", "")
-            platform = inst.get("Platform")
-            os_name = "Windows" if platform == "windows" else "Linux/Unix"
-            resources.append(
-                Resource(
-                    id=f"ec2:{region_name}:{inst['InstanceId']}",
-                    type="ec2",
-                    name=name or inst["InstanceId"],
-                    raw_id=inst["InstanceId"],
-                    status=inst["State"]["Name"],
-                    meta={
-                        "instance_type": inst.get("InstanceType", ""),
-                        "region": region_name,
-                        "os": os_name,
-                    },
-                    tags=tags,
-                )
-            )
-    return resources
+
+
+def discover_ec2(region: str | None = None):
+    provider = AWSProvider()
+    if region:
+        resources = provider.discover_resources(region, "ec2")
+    else:
+        try:
+            import boto3
+        except ImportError:
+            return []
+        client = boto3.client("ec2")
+        region_name = client._client_config.region_name or ""
+        resources = provider.discover_resources(region_name, "ec2")
+    return [_new_resource_to_old(r) for r in resources]
 
 
 def discover_rds(region: str | None = None):
-    try:
-        import boto3
-    except ImportError:
-        return []
-    kwargs = {"region_name": region} if region else {}
-    client = boto3.client("rds", **kwargs)
-    region_name = region or client._client_config.region_name or ""
-    resp = client.describe_db_instances()
-    resources = []
-    for db in resp.get("DBInstances", []):
-        tags = {}
-        db_arn = db.get("DBInstanceArn", "")
-        if db_arn:
-            try:
-                tag_resp = client.list_tags_for_resource(ResourceName=db_arn)
-                tags = {tag.get("Key", ""): tag.get("Value", "") for tag in tag_resp.get("TagList", [])}
-            except Exception:
-                pass
-        name = tags.get("Name", db["DBInstanceIdentifier"])
-        resources.append(
-            Resource(
-                id=f"rds:{region_name}:{db['DBInstanceIdentifier']}",
-                type="rds",
-                name=name,
-                raw_id=db["DBInstanceIdentifier"],
-                status=db["DBInstanceStatus"],
-                meta={
-                    "engine": db.get("Engine", ""),
-                    "region": region_name,
-                    "db_instance_class": db.get("DBInstanceClass", ""),
-                },
-                tags=tags,
-            )
-        )
-    return resources
+    provider = AWSProvider()
+    if region:
+        resources = provider.discover_resources(region, "rds")
+    else:
+        try:
+            import boto3
+        except ImportError:
+            return []
+        client = boto3.client("rds")
+        region_name = client._client_config.region_name or ""
+        resources = provider.discover_resources(region_name, "rds")
+    return [_new_resource_to_old(r) for r in resources]
 
 
 def discover_all():
@@ -127,32 +98,8 @@ def discover_all():
 
 
 def get_cloudwatch_metrics(resource_id, namespace, dimension_name, days=7, region=None):
-    try:
-        import boto3
-    except ImportError:
-        return []
-    kwargs = {"region_name": region} if region else {}
-    client = boto3.client("cloudwatch", **kwargs)
-    end = datetime.datetime.utcnow()
-    start = end - datetime.timedelta(days=days)
-    resp = client.get_metric_statistics(
-        Namespace=namespace,
-        MetricName="CPUUtilization",
-        Dimensions=[{"Name": dimension_name, "Value": resource_id}],
-        StartTime=start,
-        EndTime=end,
-        Period=3600,
-        Statistics=["Average", "Maximum"],
-    )
-    points = sorted(resp.get("Datapoints", []), key=lambda x: x["Timestamp"])
-    return [
-        {
-            "Timestamp": p["Timestamp"],
-            "Average": p["Average"],
-            "Maximum": p["Maximum"],
-        }
-        for p in points
-    ]
+    provider = AWSProvider()
+    return provider._get_cloudwatch_points(resource_id, namespace, dimension_name, days, region)
 
 
 def compute_stats(points):
