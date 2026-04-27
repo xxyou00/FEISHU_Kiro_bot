@@ -13,4 +13,9 @@ def get_provider(name: str):
 
 
 def get_all_enabled_providers():
-    return [p() for p in _REGISTRY.values() if p().is_enabled()]
+    providers = []
+    for cls in _REGISTRY.values():
+        p = cls()
+        if p.is_enabled():
+            providers.append(p)
+    return providers

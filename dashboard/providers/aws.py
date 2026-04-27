@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import os
 from collections import defaultdict
 from typing import List, Optional
@@ -10,6 +11,8 @@ except ImportError:
     boto3 = None
 
 from dashboard.providers.base import BaseResourceProvider, Resource, ResourceMetrics, MetricPoint
+
+logger = logging.getLogger(__name__)
 
 
 def _load_config() -> dict:
@@ -96,8 +99,8 @@ class AWSProvider(BaseResourceProvider):
                 try:
                     tag_resp = client.list_tags_for_resource(ResourceName=db_arn)
                     tags = {tag.get("Key", ""): tag.get("Value", "") for tag in tag_resp.get("TagList", [])}
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Failed to list tags for RDS %s: %s", db_arn, e)
             name = tags.get("Name", db["DBInstanceIdentifier"])
             resources.append(
                 Resource(

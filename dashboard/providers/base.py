@@ -66,9 +66,11 @@ class BaseResourceProvider(ABC):
 
     @abstractmethod
     def sync_metrics_to_store(self, store, backfill_days: int = 1) -> None:
-        """Sync metrics to a store that implements write_raw(provider, timestamp, resource_id, metric, value).
+        """Sync metrics to a store that implements write_hourly(records).
 
         Args:
-            store: A metrics store with a ``write_raw`` method (e.g. MetricsStore).
+            store: A metrics store with a ``write_hourly(records)`` method
+                   where records is a list of tuples
+                   (resource_id, metric_name, timestamp, value, region).
             backfill_days: Number of days to backfill when syncing.
         """

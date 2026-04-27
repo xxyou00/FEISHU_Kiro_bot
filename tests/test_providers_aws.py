@@ -259,4 +259,12 @@ def test_sync_metrics_to_store(mock_client, provider):
 
     store = MagicMock()
     provider.sync_metrics_to_store(store, backfill_days=1)
-    assert store.write_hourly.called or store.write_raw.called
+    assert store.write_hourly.called
+    call_args = store.write_hourly.call_args[0][0]
+    assert len(call_args) == 1
+    resource_id, metric_name, timestamp, value, region = call_args[0]
+    assert resource_id == "aws:ec2:cn-north-1:i-123"
+    assert metric_name == "CPUUtilization"
+    assert isinstance(timestamp, int)
+    assert value == 10.5
+    assert region == "cn-north-1"
