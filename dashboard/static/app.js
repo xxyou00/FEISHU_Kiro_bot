@@ -223,6 +223,9 @@ const AgentsPage = {
               <span class="stat-num">{{ (a.linkedSkills || []).length }}</span>
             </div>
           </div>
+          <div class="persona-linked-skills" v-if="(a.linkedSkills || []).length">
+            <span class="skill-link-tag" v-for="s in a.linkedSkills" :key="s.name">{{ s.name }}</span>
+          </div>
           <div class="card-actions">
             <button class="btn-outline" @click="openManageModal(a.name)">管理 Skills</button>
           </div>

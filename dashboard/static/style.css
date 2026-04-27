@@ -610,6 +610,29 @@ tr.pinned:hover td { background: #f1f5f9; }
   text-align: right;
   flex-shrink: 0;
 }
+.persona-linked-skills {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.skill-link-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+.skill-link-tag::before {
+  content: "⚡";
+  font-size: 10px;
+}
 
 /* ===== Book Cards (Skills) ===== */
 .book-card {
