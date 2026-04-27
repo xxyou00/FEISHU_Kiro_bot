@@ -118,6 +118,31 @@ check_deps() {
 }
 
 # -----------------------------------------------------------------------------
+# 检查数据库中是否已有指定 provider 的监控数据
+# -----------------------------------------------------------------------------
+_has_provider_data() {
+    local provider=$1
+    python3 -c "
+import sqlite3, glob, sys
+provider = '$provider'
+db_files = glob.glob('memory_db/raw_metrics_*.db')
+for db_file in db_files:
+    try:
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM hourly_metrics WHERE provider = ?', (provider,))
+        count = cursor.fetchone()[0]
+        conn.close()
+        if count > 0:
+            print('yes')
+            sys.exit(0)
+    except Exception:
+        pass
+print('no')
+"
+}
+
+# -----------------------------------------------------------------------------
 # AWS 配置检查
 # -----------------------------------------------------------------------------
 check_aws() {
@@ -559,13 +584,17 @@ setup_metrics_sync_cron() {
 
         # 询问是否立即执行首次回溯填充
         echo ""
-        read -p "是否立即执行首次回溯填充（同步过去30天数据）？(y/N): " backfill_now
-        if [[ "$backfill_now" == "y" || "$backfill_now" == "Y" ]]; then
-            info "开始回溯填充..."
-            if PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/scripts/sync_resource_metrics.py" --backfill; then
-                success "回溯填充完成"
-            else
-                error "回溯填充失败，请检查 AWS 权限和日志"
+        if [ "$(_has_provider_data "aws")" = "yes" ]; then
+            info "检测到已有 AWS 监控数据，跳过首次回溯填充"
+        else
+            read -p "是否立即执行首次回溯填充（同步过去30天数据）？(y/N): " backfill_now
+            if [[ "$backfill_now" == "y" || "$backfill_now" == "Y" ]]; then
+                info "开始回溯填充..."
+                if PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/scripts/sync_resource_metrics.py" --backfill; then
+                    success "回溯填充完成"
+                else
+                    error "回溯填充失败，请检查 AWS 权限和日志"
+                fi
             fi
         fi
     else
@@ -829,8 +858,12 @@ with open('dashboard_config.json', 'r+') as f:
     if ! command -v tccli &> /dev/null; then
         echo "WARNING: tccli not found in PATH. Please install and configure it."
     fi
-    echo "Running initial backfill for Tencent Cloud metrics (30 days)..."
-    PYTHONPATH=/home/ubuntu/kiro-devops python3 scripts/sync_resource_metrics.py --backfill || echo "WARNING: Tencent backfill failed. You can retry later with: PYTHONPATH=/home/ubuntu/kiro-devops python3 scripts/sync_resource_metrics.py --backfill"
+    if [ "$(_has_provider_data "tencent")" = "yes" ]; then
+        echo "检测到已有 Tencent 监控数据，跳过首次回溯填充"
+    else
+        echo "Running initial backfill for Tencent Cloud metrics (30 days)..."
+        PYTHONPATH=/home/ubuntu/kiro-devops python3 scripts/sync_resource_metrics.py --backfill || echo "WARNING: Tencent backfill failed. You can retry later with: PYTHONPATH=/home/ubuntu/kiro-devops python3 scripts/sync_resource_metrics.py --backfill"
+    fi
     echo "Tencent setup complete."
 else
     python3 -c "
