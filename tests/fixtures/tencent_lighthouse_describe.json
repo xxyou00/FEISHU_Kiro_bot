@@ -1,0 +1,13 @@
+{
+  "InstanceSet": [
+    {
+      "InstanceId": "lhins-abc",
+      "InstanceName": "test-lh",
+      "InstanceState": "RUNNING",
+      "BundleId": "bundle_small",
+      "OsName": "Ubuntu 20.04",
+      "CreatedTime": "2024-02-01T00:00:00Z"
+    }
+  ],
+  "TotalCount": 1
+}

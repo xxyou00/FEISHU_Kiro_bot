@@ -1,0 +1,14 @@
+{
+  "InstanceSet": [
+    {
+      "InstanceId": "ins-123456",
+      "InstanceName": "test-cvm",
+      "InstanceState": "RUNNING",
+      "InstanceType": "S5.MEDIUM2",
+      "OsName": "CentOS 7.9",
+      "Tags": [{"Key": "env", "Value": "dev"}],
+      "CreatedTime": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "TotalCount": 1
+}
