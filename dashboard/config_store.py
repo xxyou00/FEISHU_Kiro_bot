@@ -4,6 +4,8 @@
 import json
 import os
 
+CONFIG_PATH = "dashboard_config.json"
+
 CORE_KEYS = [
     "KIRO_AGENT",
     "ALERT_NOTIFY_USER_ID",
@@ -17,9 +19,9 @@ CORE_KEYS = [
 
 
 class ConfigStore:
-    def __init__(self, env_path: str = ".env", mappings_path: str = "dashboard_config.json"):
+    def __init__(self, env_path: str = ".env", mappings_path: str = None):
         self.env_path = env_path
-        self.mappings_path = mappings_path
+        self.mappings_path = mappings_path or CONFIG_PATH
 
     def _read_dashboard_config(self) -> dict:
         if not os.path.exists(self.mappings_path):
@@ -131,3 +133,32 @@ class ConfigStore:
         data = self._read_dashboard_config()
         data["pinned_resources"] = pins
         self._write_dashboard_config(data)
+
+    @staticmethod
+    def _migrate_config(cfg: dict) -> dict:
+        if "providers" not in cfg and "regions" in cfg:
+            old_regions = cfg.pop("regions", [])
+            cfg["providers"] = {
+                "aws": {"enabled": True, "regions": old_regions}
+            }
+        # Migrate pins to include provider prefix
+        pins = cfg.get("pins", [])
+        migrated_pins = []
+        for pin in pins:
+            if not pin.startswith("aws:") and not pin.startswith("tencent:"):
+                migrated_pins.append(f"aws:{pin}")
+            else:
+                migrated_pins.append(pin)
+        cfg["pins"] = migrated_pins
+        return cfg
+
+    def load(self) -> dict:
+        """Load dashboard config, auto-migrating from old flat format if needed."""
+        cfg = self._read_dashboard_config()
+        cfg = self._migrate_config(cfg)
+        return cfg
+
+    def save(self, cfg: dict) -> None:
+        """Save dashboard config in the new provider-aware format."""
+        cfg = self._migrate_config(cfg)
+        self._write_dashboard_config(cfg)
